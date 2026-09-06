@@ -7,6 +7,8 @@ import time
 
 from . import media
 from .adapters import CaptureGuard, Minecraft, OBS, copy_recording
+from .diagnostics import bundle as bundle_diagnostics
+from .diagnostics import collect as collect_diagnostics
 from .models import JobSpec
 from .runtime import Cancelled, atomic_json, run_process, start_process, wait_for
 from .scenes import compile_plan, write_pack
@@ -102,6 +104,11 @@ class Worker:
                 value = value.replace(secret, "[redacted]")
         return value[:1500]
 
+    def write_diagnostics(self, job_dir, stage, error=None):
+        return collect_diagnostics(
+            self.config, self.mc, self.obs, self.guard, job_dir, stage, self.safe_error, error=error,
+        )
+
     def execute(self, job):
         cfg, job_id = self.config, job["id"]
         self.active_job = job_id
@@ -185,6 +192,11 @@ class Worker:
             self.store.transition(job_id, "rendering", "Capture complete; exporting video and thumbnail")
             artifacts = self.renderer(cfg, spec, plan, raw, job_dir, timing, self.check_cancel)
             self.check_cancel()
+            try:
+                self.write_diagnostics(job_dir, "success")
+                artifacts["diagnostics"] = bundle_diagnostics(job_dir).name
+            except Exception as diagnostic_error:
+                atomic_json(job_dir / "diagnostics-warning.json", {"error": self.safe_error(diagnostic_error)})
             manifest = {}
             for name, filename in artifacts.items():
                 path = job_dir / filename
@@ -199,6 +211,11 @@ class Worker:
             self.store.transition(job_id, "succeeded", "Video exports verified", artifacts=artifacts)
         except BaseException as error:
             cleanup_errors = []
+            diagnostic_errors = []
+            try:
+                self.write_diagnostics(job_dir, "failure", error)
+            except Exception as diagnostic_error:
+                diagnostic_errors.append(self.safe_error(diagnostic_error))
             try:
                 if self.marker.exists():
                     self.stop_owned_recording()
@@ -209,11 +226,21 @@ class Worker:
                     self.mc.cleanup()
                 except Exception as cleanup_error:
                     cleanup_errors.append(self.safe_error(cleanup_error))
-            failure = {"error": self.safe_error(error), "cleanup_errors": cleanup_errors}
+            failure = {
+                "error": self.safe_error(error),
+                "cleanup_errors": cleanup_errors,
+                "diagnostic_errors": diagnostic_errors,
+            }
             atomic_json(job_dir / "failure.json", failure)
+            diagnostic_artifacts = {}
+            try:
+                diagnostic_artifacts["diagnostics"] = bundle_diagnostics(job_dir).name
+            except Exception as diagnostic_error:
+                failure["diagnostic_errors"].append(self.safe_error(diagnostic_error))
+                atomic_json(job_dir / "failure.json", failure)
             state = ("cancelled" if isinstance(error, Cancelled) else "interrupted"
                      if isinstance(error, (KeyboardInterrupt, InterruptedError, SystemExit)) else "failed")
-            self.store.transition(job_id, state, failure["error"])
+            self.store.transition(job_id, state, failure["error"], artifacts=diagnostic_artifacts)
             if cleanup_errors or isinstance(error, (KeyboardInterrupt, SystemExit)):
                 # An uncertain recorder is not safe to reuse for the next queued job.
                 raise RuntimeError("Worker stopped after cleanup failure; see failure.json") from error
