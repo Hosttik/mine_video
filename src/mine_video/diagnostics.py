@@ -15,6 +15,20 @@ def _safe_capture(report, name, action, safe_error):
         report["checks"][name] = {"ok": False, "detail": safe_error(error)}
 
 
+def _redact(value, secrets):
+    if isinstance(value, dict):
+        return {key: _redact(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return [_redact(item, secrets) for item in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            if secret:
+                value = value.replace(secret, "[redacted]")
+    return value
+
+
 def collect(config, mc, obs, guard, job_dir: Path, stage: str, safe_error, error=None):
     """Capture best-effort machine state without ever including local secrets."""
     root = job_dir / "diagnostics"
@@ -77,6 +91,8 @@ def collect(config, mc, obs, guard, job_dir: Path, stage: str, safe_error, error
     screenshot = root / f"{stage}-obs.png"
     _safe_capture(report, "obs_screenshot", lambda: obs.screenshot(screenshot), safe_error)
 
+    secrets = (config.rcon_password, config.obs_password, config.guard_token, config.api_token)
+    report = _redact(report, secrets)
     target = root / f"{stage}.json"
     atomic_json(target, report)
     return target
