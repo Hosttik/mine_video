@@ -1,0 +1,33 @@
+data_dir = "data"
+datapack_dir = "server-data/world/datapacks"
+# Set this exact absolute directory in OBS > Settings > Output > Recording Path.
+recording_root = "recordings"
+guard_url = "http://127.0.0.1:8766"
+
+[minecraft]
+host = "127.0.0.1"
+port = 25575
+player = "CameraBot"
+server_address = "localhost:25565"
+server_command = ["docker", "compose", "up", "-d", "mc"]
+client_command = ["prismlauncher", "--launch", "MineVideo", "--server", "localhost:25565"]
+startup_timeout = 180
+
+[obs]
+host = "127.0.0.1"
+port = 4455
+profile = "MineVideo"
+scene = "MineVideo"
+source = "Minecraft"
+command = ["obs", "--profile", "MineVideo", "--collection", "MineVideo", "--minimize-to-tray"]
+
+[media]
+ffmpeg = "ffmpeg"
+ffprobe = "ffprobe"
+width = 1920
+height = 1080
+fps = 30
+crf = 20
+preset = "medium"
+minimum_free_gb = 2
+render_timeout = 1800

@@ -1,0 +1,16 @@
+.env
+/mine-video.toml
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ruff_cache/
+data/
+server-data/
+recordings/
+dist/
+build/
+.gradle/
+*.log
+*.zip
+*.jar

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "minevideo-capture",
+  "version": "${version}",
+  "name": "MineVideo Capture Guard",
+  "description": "Render readiness and HUD control for a dedicated recording client",
+  "environment": "client",
+  "entrypoints": {"client": ["video.minevideo.CaptureGuard"]},
+  "mixins": ["minevideo-capture.mixins.json"],
+  "depends": {"fabricloader": ">=0.16.10", "minecraft": "1.21.4", "java": ">=21"}
+}

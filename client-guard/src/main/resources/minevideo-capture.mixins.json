@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "video.minevideo.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": ["ClientMixin", "RendererMixin"],
+  "injectors": {"defaultRequire": 1}
+}
