@@ -88,11 +88,13 @@ class WorkerTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch("mine_video.worker.time.monotonic", side_effect=itertools.count(0, .2)).start()
         patch("mine_video.worker.time.sleep").start()
+
         def copy(src, _root, directory, check):
             check()
             target = directory / "raw.mkv"
             shutil.copyfile(src, target)
             return target
+
         patch("mine_video.worker.copy_recording", side_effect=copy).start()
 
     def test_success_stops_obs_and_publishes_checksums(self):
@@ -104,6 +106,7 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(self.worker.marker.exists())
         manifest = json.loads((self.config.data_dir / "jobs" / self.job["id"] / "manifest.json").read_text())
         self.assertEqual(len(manifest["short"]["sha256"]), 64)
+        self.assertEqual(len(manifest["diagnostics"]["sha256"]), 64)
 
     def test_existing_recording_is_never_stopped(self):
         self.obs.active = True
@@ -118,14 +121,15 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.obs.stops, 1)
         self.assertEqual(self.worker.store.get(self.job["id"])["state"], "cancelled")
 
-    def test_game_failure_stops_obs_and_does_not_publish(self):
+    def test_game_failure_stops_obs_and_only_publishes_diagnostics(self):
         def fail(): raise RuntimeError("RCON connection dropped")
         self.mc.on_status = fail
         self.worker.execute(self.job)
         self.assertEqual(self.obs.stops, 1)
         result = self.worker.store.get(self.job["id"])
         self.assertEqual(result["state"], "failed")
-        self.assertFalse(result["artifacts"])
+        self.assertEqual(result["artifacts"], {"diagnostics": "diagnostics.zip"})
+        self.assertTrue((self.config.data_dir / "jobs" / self.job["id"] / "diagnostics.zip").is_file())
 
     def test_frozen_source_is_rejected_after_stopping_recording(self):
         self.obs.frozen = True
