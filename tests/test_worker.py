@@ -42,8 +42,10 @@ class FakeOBS:
             raise RuntimeError("OBS is already recording")
         return self.sample()
     def call(self, kind):
-        if kind == "GetProfileList": return {"currentProfileName": "MineVideo"}
-        if kind == "GetRecordStatus": return {"outputActive": self.active}
+        if kind == "GetProfileList":
+            return {"currentProfileName": "MineVideo"}
+        if kind == "GetRecordStatus":
+            return {"outputActive": self.active}
         raise AssertionError(kind)
     def sample(self):
         self.frames += 1

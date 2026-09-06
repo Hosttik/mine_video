@@ -45,6 +45,9 @@ def run_process(args, *, cwd: Path, log: Path, timeout: float, check_cancel=lamb
 def start_process(args, *, cwd: Path, log: Path):
     if not args:
         raise RuntimeError("Startup command is empty: start the configured application manually")
+    if os.name == "nt" and Path(args[0]).is_absolute():
+        # OBS on Windows resolves some resources from its executable directory.
+        cwd = Path(args[0]).parent
     # GUI launchers may hand off to another process. Readiness comes from probes, never the PID.
     with log.open("ab") as output:
         return subprocess.Popen(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,

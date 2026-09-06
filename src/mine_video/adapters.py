@@ -177,7 +177,7 @@ class OBS:
         if self.call("GetCurrentProgramScene")["currentProgramSceneName"] != self.config.obs.scene:
             raise RuntimeError("OBS scene changed during the job")
         response = self.call("GetSourceScreenshot", {
-            "sourceName": self.config.obs.source, "imageFormat": "png", "imageWidth": 320,
+            "sourceName": self.config.obs.scene, "imageFormat": "png", "imageWidth": 320,
         })
         png = base64.b64decode(response["imageData"].split(",", 1)[1], validate=True)
         with Image.open(io.BytesIO(png)) as image:
