@@ -98,8 +98,17 @@ def collect(config, mc, obs, guard, job_dir: Path, stage: str, safe_error, error
     return target
 
 
-def bundle(job_dir: Path):
-    """Create a portable, secret-free bundle suitable for attaching to a bug report."""
+def _write_scrubbed(archive, path, arcname, secrets):
+    if path.suffix.lower() in {".json", ".log", ".txt"}:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        archive.writestr(str(arcname), _redact(text, secrets))
+    else:
+        archive.write(path, arcname)
+
+
+def bundle(job_dir: Path, secrets=()):
+    """Create a portable bundle; textual files are scrubbed again while they are archived."""
+    secrets = tuple(secret for secret in secrets if secret)
     target = job_dir / "diagnostics.zip"
     temp = target.with_suffix(".zip.tmp")
     candidates = [
@@ -118,8 +127,8 @@ def bundle(job_dir: Path):
             if candidate.is_dir():
                 for path in sorted(candidate.rglob("*")):
                     if path.is_file():
-                        archive.write(path, path.relative_to(job_dir))
+                        _write_scrubbed(archive, path, path.relative_to(job_dir), secrets)
             elif candidate.is_file():
-                archive.write(candidate, candidate.relative_to(job_dir))
+                _write_scrubbed(archive, candidate, candidate.relative_to(job_dir), secrets)
     temp.replace(target)
     return target
