@@ -84,7 +84,7 @@ def create_app(config):
     @app.get("/jobs/{job_id}/artifacts/{name}", dependencies=[Depends(authorize)])
     def artifact(job_id: str, name: str):
         job = get_job(job_id)
-        if job["state"] != "succeeded" or name not in job["artifacts"]:
+        if name not in job["artifacts"] or (job["state"] != "succeeded" and name != "diagnostics"):
             raise HTTPException(404, "Artifact not available")
         directory = (config.data_dir / "jobs" / job_id).resolve()
         path = (directory / job["artifacts"][name]).resolve()
