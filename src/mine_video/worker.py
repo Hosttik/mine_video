@@ -96,10 +96,17 @@ class Worker:
             except Exception as error:
                 atomic_json(self.config.data_dir / "recovery-warning.json", {"error": self.safe_error(error)})
 
+    def diagnostic_secrets(self):
+        return (
+            self.config.rcon_password,
+            self.config.obs_password,
+            self.config.guard_token,
+            self.config.api_token,
+        )
+
     def safe_error(self, error):
         value = f"{type(error).__name__}: {error}"
-        for secret in (self.config.rcon_password, self.config.obs_password,
-                       self.config.guard_token, self.config.api_token):
+        for secret in self.diagnostic_secrets():
             if secret:
                 value = value.replace(secret, "[redacted]")
         return value[:1500]
@@ -194,7 +201,7 @@ class Worker:
             self.check_cancel()
             try:
                 self.write_diagnostics(job_dir, "success")
-                artifacts["diagnostics"] = bundle_diagnostics(job_dir).name
+                artifacts["diagnostics"] = bundle_diagnostics(job_dir, self.diagnostic_secrets()).name
             except Exception as diagnostic_error:
                 atomic_json(job_dir / "diagnostics-warning.json", {"error": self.safe_error(diagnostic_error)})
             manifest = {}
@@ -234,7 +241,9 @@ class Worker:
             atomic_json(job_dir / "failure.json", failure)
             diagnostic_artifacts = {}
             try:
-                diagnostic_artifacts["diagnostics"] = bundle_diagnostics(job_dir).name
+                diagnostic_artifacts["diagnostics"] = bundle_diagnostics(
+                    job_dir, self.diagnostic_secrets()
+                ).name
             except Exception as diagnostic_error:
                 failure["diagnostic_errors"].append(self.safe_error(diagnostic_error))
                 atomic_json(job_dir / "failure.json", failure)
