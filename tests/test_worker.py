@@ -46,10 +46,17 @@ class FakeOBS:
             return {"currentProfileName": "MineVideo"}
         if kind == "GetRecordStatus":
             return {"outputActive": self.active}
+        if kind == "GetStreamStatus":
+            return {"outputActive": False}
+        if kind == "GetCurrentProgramScene":
+            return {"currentProgramSceneName": "MineVideo"}
         raise AssertionError(kind)
     def sample(self):
         self.frames += 1
         return {"sha256": str(1 if self.frozen else self.frames)}
+    def screenshot(self, path):
+        path.write_bytes(b"diagnostic screenshot fixture")
+        return {"file": str(path), "sha256": "diagnostic"}
     def start(self): self.active = True
     def record_seconds(self):
         self.seconds += 1
@@ -62,6 +69,7 @@ class FakeOBS:
 
 class FakeGuard:
     def ready(self, _): return {"protocol": 1}
+    def status(self): return {"protocol": 1, "renderAgeMs": 10}
 
 
 def fake_renderer(_config, _spec, _plan, _raw, directory, _timing, check_cancel):
