@@ -64,19 +64,23 @@ class Minecraft:
 
     def deploy(self, nonce, check_cancel):
         self.command("reload")
+
         def loaded():
             if self.score("nonce") != nonce:
                 raise RuntimeError("New datapack did not load; inspect server logs")
             return True
+
         wait_for(loaded, timeout=30, check_cancel=check_cancel)
         # Forced chunks are requested asynchronously; filling in the same tick can silently fail.
         self.command(f"execute in {DIMENSION} run forceload add -48 -48 48 48")
         conditions = " ".join(f"if loaded {x * 16} 80 {z * 16}" for x in range(-2, 2) for z in range(-2, 2))
+
         def chunks_loaded():
             self.command(f"execute in {DIMENSION} store success score #loaded mv {conditions}")
             if self.score("loaded") != 1:
                 raise RuntimeError("Waiting for studio chunks")
             return True
+
         wait_for(chunks_loaded, timeout=45, check_cancel=check_cancel)
         self.command("function minevideo:prepare")
         if self.score("ready") != 1:
@@ -173,21 +177,35 @@ class OBS:
         self.call("SetCurrentProgramScene", {"sceneName": cfg.scene})
         return self.sample()
 
-    def sample(self):
+    def _screenshot_png(self):
         if self.call("GetCurrentProgramScene")["currentProgramSceneName"] != self.config.obs.scene:
             raise RuntimeError("OBS scene changed during the job")
         response = self.call("GetSourceScreenshot", {
             "sourceName": self.config.obs.scene, "imageFormat": "png", "imageWidth": 320,
         })
-        png = base64.b64decode(response["imageData"].split(",", 1)[1], validate=True)
+        return base64.b64decode(response["imageData"].split(",", 1)[1], validate=True)
+
+    @staticmethod
+    def _analyze_png(png):
         with Image.open(io.BytesIO(png)) as image:
             gray = image.convert("L")
             stats = ImageStat.Stat(gray)
             brightness, deviation = stats.mean[0], stats.stddev[0]
             digest = hashlib.sha256(gray.tobytes()).hexdigest()
-        if brightness < 3 or deviation < 2:
-            raise RuntimeError("Minecraft capture is black or blank; check the OBS source and window permission")
         return {"sha256": digest, "brightness": round(brightness, 2), "deviation": round(deviation, 2)}
+
+    def screenshot(self, path: Path):
+        png = self._screenshot_png()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
+        return {**self._analyze_png(png), "file": str(path)}
+
+    def sample(self):
+        png = self._screenshot_png()
+        result = self._analyze_png(png)
+        if result["brightness"] < 3 or result["deviation"] < 2:
+            raise RuntimeError("Minecraft capture is black or blank; check the OBS source and window permission")
+        return result
 
     def start(self):
         self.call("StartRecord")
@@ -217,6 +235,7 @@ def copy_recording(source: Path, root: Path, target_dir: Path, check_cancel=lamb
         raise RuntimeError("OBS output is outside recording_root; set the same local path in OBS and config")
     previous = None
     stable = 0
+
     def complete():
         nonlocal previous, stable
         size = source.stat().st_size
@@ -225,6 +244,7 @@ def copy_recording(source: Path, root: Path, target_dir: Path, check_cancel=lamb
         if stable < 2:
             raise RuntimeError("Waiting for recording file to settle")
         return True
+
     wait_for(complete, timeout=15, check_cancel=check_cancel)
     target = target_dir / ("raw" + source.suffix.lower())
     temp = target.with_suffix(target.suffix + ".tmp")
