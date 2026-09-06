@@ -40,8 +40,15 @@ def parser():
         sub.add_argument("job_id", nargs="?" if command == "status" else None)
         if command == "wait":
             sub.add_argument("--timeout", type=int, default=900)
-    worker = commands.add_parser("worker")
-    worker.add_argument("--once", action="store_true")
+    for command in ("worker", "agent"):
+        worker = commands.add_parser(
+            command,
+            help="Run the local recording machine" if command == "agent" else None,
+        )
+        worker.add_argument("--once", action="store_true")
+    smoke = commands.add_parser("smoke-test", help="Record and render one real TNT scene on this machine")
+    smoke.add_argument("--seed", type=int, default=20260906)
+    smoke.add_argument("--timeout", type=int, default=420)
     for command in ("serve", "start"):
         serve = commands.add_parser(command)
         serve.add_argument("--host", default="127.0.0.1")
@@ -55,12 +62,14 @@ def doctor(config, launch=False):
     from .adapters import CaptureGuard, Minecraft, OBS
     from .worker import Worker
     checks = []
+
     def check(name, action):
         try:
             value = action()
             checks.append({"name": name, "ok": True, "detail": value})
         except Exception as error:
             checks.append({"name": name, "ok": False, "detail": str(error)})
+
     for name, executable in (("ffmpeg", config.media.ffmpeg), ("ffprobe", config.media.ffprobe)):
         def binary(executable=executable):
             found = shutil.which(executable)
@@ -90,6 +99,76 @@ def doctor(config, launch=False):
     return 0 if all(c["ok"] for c in checks) else 1
 
 
+def worker_alive(config):
+    try:
+        heartbeat = json.loads((config.data_dir / "worker.json").read_text(encoding="utf-8"))
+        return time.time() - float(heartbeat["at"]) < 15
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def wait_for_job(store, job_id, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        job = store.get(job_id)
+        if not job:
+            raise RuntimeError("Smoke-test job disappeared from the queue")
+        if job["state"] in TERMINAL:
+            return job
+        time.sleep(.5)
+    raise TimeoutError("Smoke-test timed out; the job remains available for diagnosis")
+
+
+def smoke_test(config, seed, timeout):
+    if not 15 <= timeout <= 3600:
+        raise ValueError("Smoke-test timeout must be between 15 and 3600 seconds")
+    if not 0 <= seed <= 2_147_483_647:
+        raise ValueError("Seed must be between 0 and 2147483647")
+    store = Store(config.database)
+    active = [job for job in store.list(200) if job["state"] not in TERMINAL]
+    if active:
+        raise RuntimeError(
+            f"Studio is not idle: job {active[-1]['id']} is {active[-1]['state']}. "
+            "Finish or cancel active jobs before smoke-test."
+        )
+    spec = JobSpec(
+        template="tnt_chain",
+        seed=seed,
+        duration_seconds=20,
+        mob_count=2,
+        formats=["landscape"],
+        language="en",
+        title="MineVideo real capture smoke test",
+    )
+    job = store.submit(spec)
+    job_id = job["id"]
+
+    if not worker_alive(config):
+        from .worker import Worker
+        try:
+            Worker(config).run(once=True)
+        except Exception:
+            # A concurrently starting agent may win the machine lock between the heartbeat check and run().
+            if not worker_alive(config):
+                raise
+
+    result = wait_for_job(store, job_id, timeout)
+    job_dir = config.data_dir / "jobs" / job_id
+    diagnostics = result["artifacts"].get("diagnostics")
+    payload = {
+        "job_id": job_id,
+        "state": result["state"],
+        "error": result["error"],
+        "job_dir": str(job_dir),
+        "video": str(job_dir / result["artifacts"]["landscape"])
+        if "landscape" in result["artifacts"] else None,
+        "diagnostics": str(job_dir / diagnostics) if diagnostics else None,
+        "artifacts": result["artifacts"],
+    }
+    output(payload)
+    return 0 if result["state"] == "succeeded" else 1
+
+
 def main():
     args = parser().parse_args()
     try:
@@ -104,6 +183,8 @@ def main():
             return 0
         if args.command == "doctor":
             return doctor(config, args.launch)
+        if args.command == "smoke-test":
+            return smoke_test(config, args.seed, args.timeout)
         if args.command in {"submit", "preview"}:
             spec = JobSpec(template=args.template, seed=args.seed, duration_seconds=args.duration,
                            mob_count=args.mobs, language=args.language, title=args.title,
@@ -131,18 +212,11 @@ def main():
             elif args.command == "cancel":
                 output(store.cancel(args.job_id))
             else:
-                deadline = time.monotonic() + args.timeout
-                while time.monotonic() < deadline:
-                    job = store.get(args.job_id)
-                    if not job:
-                        raise ValueError("Job not found")
-                    if job["state"] in TERMINAL:
-                        output(job)
-                        return 0 if job["state"] == "succeeded" else 1
-                    time.sleep(.5)
-                raise TimeoutError("Job is still pending; wait timeout does not cancel it")
+                job = wait_for_job(store, args.job_id, args.timeout)
+                output(job)
+                return 0 if job["state"] == "succeeded" else 1
             return 0
-        if args.command == "worker":
+        if args.command in {"worker", "agent"}:
             from .worker import Worker
             worker = Worker(config)
             signal.signal(signal.SIGTERM, lambda *_: worker.stop.set())
@@ -156,7 +230,7 @@ def main():
             worker = None
             if args.command == "start":
                 worker = subprocess.Popen([sys.executable, "-m", "mine_video", "--config",
-                                           str(Path(args.config).resolve()), "worker"])
+                                           str(Path(args.config).resolve()), "agent"])
             try:
                 uvicorn.run(app, host=args.host, port=args.port, access_log=False)
             finally:

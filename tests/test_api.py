@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 
 from mine_video.config import Settings
+from mine_video.models import JobSpec
+from mine_video.store import Store
 
 
 @unittest.skipUnless(importlib.util.find_spec("fastapi") and importlib.util.find_spec("httpx"), "API dependencies")
@@ -36,3 +38,18 @@ class APITests(unittest.TestCase):
         result = self.client.get(f"/jobs/{job['id']}/artifacts/metadata", headers=self.headers)
         self.assertEqual(result.status_code, 404)
         self.assertFalse(self.client.get("/health").json()["worker_ready"])
+
+    def test_failed_job_can_publish_only_its_diagnostics_artifact(self):
+        store = Store(self.config.database)
+        job = store.submit(JobSpec())
+        claimed = store.claim()
+        self.assertEqual(claimed["id"], job["id"])
+        job_dir = self.config.data_dir / "jobs" / job["id"]
+        job_dir.mkdir(parents=True)
+        (job_dir / "diagnostics.zip").write_bytes(b"diagnostics")
+        (job_dir / "raw.mkv").write_bytes(b"must not be exposed")
+        store.transition(job["id"], "failed", "boom", artifacts={"diagnostics": "diagnostics.zip", "raw": "raw.mkv"})
+        diagnostics = self.client.get(f"/jobs/{job['id']}/artifacts/diagnostics", headers=self.headers)
+        self.assertEqual(diagnostics.status_code, 200)
+        raw = self.client.get(f"/jobs/{job['id']}/artifacts/raw", headers=self.headers)
+        self.assertEqual(raw.status_code, 404)
