@@ -12,6 +12,16 @@ from mine_video.config import Settings
 
 
 class AdapterTests(unittest.TestCase):
+    def test_record_start_waits_for_encoder_readiness(self):
+        obs = OBS(Settings())
+        responses = iter([
+            {"outputActive": False, "outputDuration": 0},
+            {"outputActive": True, "outputDuration": 100},
+        ])
+        obs.call = lambda kind: {} if kind == "StartRecord" else next(responses)
+        with patch("mine_video.runtime.time.sleep"):
+            self.assertEqual(obs.start(), .1)
+
     def test_scoreboard_response_is_checked_instead_of_assuming_success(self):
         mc = Minecraft(Settings())
         mc.command = lambda _: "#tick has 123 [mv]"

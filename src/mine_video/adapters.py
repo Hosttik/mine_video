@@ -191,7 +191,8 @@ class OBS:
 
     def start(self):
         self.call("StartRecord")
-        return self.record_seconds()
+        # OBS may acknowledge the request before the encoder becomes active.
+        return wait_for(self.record_seconds, timeout=15, interval=.1)
 
     def record_seconds(self):
         state = self.call("GetRecordStatus")
